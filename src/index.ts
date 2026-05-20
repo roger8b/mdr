@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import http from "node:http";
+import { runInit } from "./commands/init.js";
 
 const LOCK_DIR = path.join(os.homedir(), ".mdr");
 const LOCK_FILE = path.join(LOCK_DIR, "server.lock");
@@ -319,5 +320,32 @@ program
   .command("purge")
   .description("Close all documents, keep server running")
   .action(purgeServer);
+
+program
+  .command("init")
+  .description("Wire a project for AI agents (install skills, update rule files)")
+  .option("-y, --yes", "Non-interactive: use defaults", false)
+  .option("--scope <local|global|both>", "Install scope", undefined)
+  .option("--method <symlink|copy>", "Installation method", undefined)
+  .option("--show-all", "Show all agents, not just detected", false)
+  .option("--update", "Re-sync existing skills", false)
+  .option("--force", "Overwrite existing mdr sections", false)
+  .action(async (opts) => {
+    try {
+      const exitCode = await runInit({
+        cwd: process.cwd(),
+        yes: opts.yes,
+        scope: opts.scope,
+        method: opts.method,
+        showAll: opts.showAll,
+        update: opts.update,
+        force: opts.force,
+      });
+      process.exitCode = exitCode;
+    } catch (err) {
+      console.error(pc.red(`\n✗ ${(err as Error).message}`));
+      process.exitCode = 1;
+    }
+  });
 
 program.parse();

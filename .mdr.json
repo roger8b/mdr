@@ -1,0 +1,9 @@
+{
+  "agents": [
+    "pi"
+  ],
+  "scope": "local",
+  "method": "symlink",
+  "version": 1,
+  "installed_at": "2026-05-20T02:14:10.558Z"
+}
