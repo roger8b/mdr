@@ -1,37 +1,26 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { marked, Renderer, Tokens } from "marked";
+import { marked } from "marked";
 import pc from "picocolors";
 import open from "open";
 import { createServer } from "node:http";
 
 const DEFAULT_PORT = 3000;
 
-// Custom renderer for mermaid code blocks
-function createMermaidRenderer(): Partial<Renderer> {
-  return {
-    code(token: Tokens.Code): string {
-      const code = token.text || '';
-      const lang = token.lang || '';
-      
-      // Check if this is a mermaid code block
-      if (lang === 'mermaid') {
-        // Escape the code for embedding in HTML
-        const escapedCode = code
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;');
-        return `<div class="mermaid">${escapedCode}</div>`;
-      }
-      
-      // Default code block handling
-      const escapedCode = code
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      return `<pre><code>${escapedCode}</code></pre>`;
+// Process mermaid code blocks after marked parsing
+function processMermaidBlocks(html: string): string {
+  return html.replace(
+    /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
+    (_, code) => {
+      const decoded = code
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&#39;/g, "'")
+        .replace(/&quot;/g, '"');
+      return `<div class="mermaid">${decoded.trim()}</div>`;
     }
-  };
+  );
 }
 
 export async function serve(filePath: string): Promise<void> {
@@ -47,7 +36,8 @@ export async function serve(filePath: string): Promise<void> {
 
   // Read file content
   const content = await fs.readFile(filePath, "utf-8");
-  const html = await marked.parse(content);
+  const rawHtml = await marked.parse(content);
+  const html = processMermaidBlocks(rawHtml);
   
   const fileName = path.basename(filePath);
   const page = buildPage(html, fileName);
@@ -115,6 +105,7 @@ function buildPage(htmlContent: string, fileName: string): string {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <style>
     :root {
@@ -604,12 +595,191 @@ function buildPage(htmlContent: string, fileName: string): string {
       padding: 32px;
       margin: 36px 0;
       text-align: center;
-      overflow-x: auto;
+      position: relative;
     }
 
     .article-content .mermaid svg {
-      max-width: 100%;
+      max-width: none;
       height: auto;
+      display: block;
+      margin: 0 auto;
+    }
+
+    /* Mermaid Pan/Zoom Container */
+    .mermaid-container {
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      background: #fafafa;
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+      margin: 36px 0;
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+
+    .mermaid-container:focus {
+      outline: 2px solid var(--border-light);
+      outline-offset: 2px;
+    }
+
+    .mermaid-container .mermaid {
+      border: none;
+      border-radius: 0;
+      margin: 0;
+      padding: 24px;
+      width: 100%;
+      min-width: 100%;
+      min-height: 0;
+      background: transparent;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .mermaid-container .mermaid svg {
+      display: block;
+      flex: 0 0 auto;
+      max-width: none !important;
+      max-height: none !important;
+      margin: 0 auto;
+      overflow: visible;
+    }
+
+    /* Keep Mermaid text metrics stable after rendering.
+       This avoids nodes being measured with one font and displayed with another. */
+    .mermaid-container .mermaid svg text,
+    .mermaid-container .mermaid svg .label,
+    .mermaid-container .mermaid svg .nodeLabel,
+    .mermaid-container .mermaid svg .edgeLabel,
+    .mermaid-container .mermaid svg .state-title,
+    .mermaid-container .mermaid svg .transition {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+      font-size: 14px !important;
+      line-height: 1.25;
+    }
+
+    .mermaid-container .mermaid svg foreignObject,
+    .mermaid-container .mermaid svg foreignObject div,
+    .mermaid-container .mermaid svg foreignObject span {
+      overflow: visible;
+      line-height: 1.25;
+      white-space: nowrap;
+    }
+
+    .mermaid-container.zoomed {
+      overflow: auto;
+    }
+
+    .mermaid-container:fullscreen {
+      width: 100vw;
+      height: 100vh;
+      max-width: none;
+      margin: 0;
+      padding: 0;
+      border: none;
+      border-radius: 0;
+      overflow: hidden;
+      background: #fafafa;
+    }
+
+    .mermaid-container:fullscreen .mermaid {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      padding: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .mermaid-container:fullscreen .mermaid svg {
+      width: calc(100vw - 64px) !important;
+      height: calc(100vh - 96px) !important;
+    }
+
+    /* Mermaid Toolbar */
+    .mermaid-toolbar {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      padding: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      z-index: 100;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.2s, transform 0.2s;
+    }
+
+    .mermaid-container:hover .mermaid-toolbar,
+    .mermaid-toolbar:focus-within {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .mermaid-toolbar.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .mermaid-toolbar-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .mermaid-toolbar-btn:hover {
+      background: #f0f0f0;
+      color: var(--text-primary);
+    }
+
+    .mermaid-toolbar-btn:active {
+      background: #e5e5e5;
+      transform: scale(0.95);
+    }
+
+    .mermaid-toolbar-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .mermaid-toolbar-separator {
+      width: 1px;
+      height: 20px;
+      background: var(--border-light);
+      margin: 0 2px;
+    }
+
+    .mermaid-toolbar-btn.active {
+      background: #f0f0f0;
+      color: var(--text-primary);
+    }
+
+    /* Mermaid zoom indicator */
+    .mermaid-zoom-indicator {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-tertiary);
+      padding: 0 8px;
+      min-width: 48px;
+      text-align: center;
     }
 
     /* Mermaid pre-rendered */
@@ -804,6 +974,326 @@ function buildPage(htmlContent: string, fileName: string): string {
   </footer>
 
   <script>
+    // Mermaid Pan/Zoom Manager
+    class MermaidPanZoomManager {
+      constructor() {
+        this.instances = new Map();
+        this.init();
+      }
+
+      init() {
+        document.addEventListener('DOMContentLoaded', () => {
+          this.processDiagrams();
+        });
+
+        window.addEventListener('load', () => {
+          setTimeout(() => this.processDiagrams(), 100);
+        });
+
+        window.addEventListener('resize', () => {
+          this.resizeAll();
+        });
+
+        document.addEventListener('fullscreenchange', () => {
+          this.handleFullscreenChange();
+        });
+      }
+
+      processDiagrams() {
+        const diagrams = document.querySelectorAll('.article-content .mermaid');
+        diagrams.forEach((diagram, index) => {
+          const existingContainer = diagram.closest('.mermaid-container');
+          if (existingContainer) return; // Already processed
+
+          this.wrapAndEnhance(diagram, index);
+        });
+      }
+
+      wrapAndEnhance(diagram, index) {
+        const container = document.createElement('div');
+        container.className = 'mermaid-container';
+        container.dataset.index = String(index);
+        container.tabIndex = 0;
+
+        // Insert container before the diagram
+        diagram.parentNode.insertBefore(container, diagram);
+
+        // Move diagram into container
+        container.appendChild(diagram);
+
+        // Add toolbar
+        const toolbar = this.createToolbar(index);
+        container.appendChild(toolbar);
+
+        // Normalize diagram layout before Mermaid renders the SVG
+        diagram.style.padding = '24px';
+        diagram.style.display = 'flex';
+        diagram.style.alignItems = 'center';
+        diagram.style.justifyContent = 'center';
+        diagram.style.background = 'transparent';
+        diagram.style.border = 'none';
+        diagram.style.borderRadius = '0';
+        diagram.style.margin = '0';
+        diagram.style.textAlign = 'center';
+
+        // Wait for Mermaid to render the SVG
+        this.waitForSVG(diagram, (svg) => {
+          this.initPanZoom(container, diagram, svg, index);
+          toolbar.classList.add('show');
+        });
+      }
+
+      createToolbar(index) {
+        const toolbar = document.createElement('div');
+        toolbar.className = 'mermaid-toolbar';
+        toolbar.dataset.index = String(index);
+
+        const zoomOutBtn = '<button class="mermaid-toolbar-btn" title="Zoom out (-)" data-action="zoomOut" data-index="' + index + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
+        const zoomInBtn = '<button class="mermaid-toolbar-btn" title="Zoom in (+)" data-action="zoomIn" data-index="' + index + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>';
+        const resetBtn = '<button class="mermaid-toolbar-btn" title="Reset view (R)" data-action="reset" data-index="' + index + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>';
+        const fullscreenBtn = '<button class="mermaid-toolbar-btn" title="Fullscreen (F)" data-action="fullscreen" data-index="' + index + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>';
+        const sep = '<div class="mermaid-toolbar-separator"></div>';
+        const indicator = '<span class="mermaid-zoom-indicator" data-index="' + index + '">100%</span>';
+
+        toolbar.innerHTML = resetBtn + sep + zoomOutBtn + indicator + zoomInBtn + sep + fullscreenBtn;
+
+        toolbar.addEventListener('click', (e) => {
+          const btn = e.target.closest('.mermaid-toolbar-btn');
+          if (!btn) return;
+
+          const action = btn.dataset.action;
+          const idx = parseInt(btn.dataset.index, 10);
+          const record = this.instances.get(idx);
+
+          if (!record) return;
+
+          switch (action) {
+            case 'reset':
+              this.fitAndCenter(idx);
+              break;
+            case 'zoomIn':
+              record.panZoom.zoomIn();
+              break;
+            case 'zoomOut':
+              record.panZoom.zoomOut();
+              break;
+            case 'fullscreen':
+              this.toggleFullscreen(btn.closest('.mermaid-container'));
+              break;
+          }
+        });
+
+        return toolbar;
+      }
+
+      waitForSVG(diagram, callback, attempt = 0) {
+        const svg = diagram.querySelector('svg');
+
+        if (svg) {
+          callback(svg);
+          return;
+        }
+
+        if (attempt > 120) {
+          console.warn('Mermaid SVG was not rendered in time.');
+          return;
+        }
+
+        setTimeout(() => this.waitForSVG(diagram, callback, attempt + 1), 50);
+      }
+
+      readSvgSize(svg) {
+        const viewBox = svg.getAttribute('viewBox');
+        if (viewBox) {
+          const parts = viewBox.trim().split(/[\s,]+/).map(Number);
+          if (parts.length === 4 && parts.every(Number.isFinite) && parts[2] > 0 && parts[3] > 0) {
+            return { width: parts[2], height: parts[3] };
+          }
+        }
+
+        const widthAttr = svg.getAttribute('width') || '';
+        const heightAttr = svg.getAttribute('height') || '';
+        const attrWidth = widthAttr.includes('%') ? 0 : parseFloat(widthAttr);
+        const attrHeight = heightAttr.includes('%') ? 0 : parseFloat(heightAttr);
+
+        if (attrWidth > 0 && attrHeight > 0) {
+          return { width: attrWidth, height: attrHeight };
+        }
+
+        try {
+          const box = svg.getBBox();
+          if (box.width > 0 && box.height > 0) {
+            return { width: box.width, height: box.height };
+          }
+        } catch (error) {
+          // getBBox can fail before the SVG is fully attached to the DOM.
+        }
+
+        return { width: 800, height: 450 };
+      }
+
+      prepareSvg(svg) {
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.style.display = 'block';
+        svg.style.margin = '0 auto';
+        svg.style.maxWidth = 'none';
+        svg.style.maxHeight = 'none';
+      }
+
+      applyViewport(record) {
+        const isFullscreen = document.fullscreenElement === record.container;
+        const naturalWidth = Math.max(record.naturalWidth, 1);
+        const naturalHeight = Math.max(record.naturalHeight, 1);
+
+        if (isFullscreen) {
+          const viewportWidth = Math.max(320, window.innerWidth - 64);
+          const viewportHeight = Math.max(240, window.innerHeight - 96);
+
+          record.diagram.style.width = '100%';
+          record.diagram.style.height = '100%';
+          record.diagram.style.minWidth = '0';
+          record.diagram.style.minHeight = '0';
+
+          record.svg.setAttribute('width', String(viewportWidth));
+          record.svg.setAttribute('height', String(viewportHeight));
+          record.svg.style.width = viewportWidth + 'px';
+          record.svg.style.height = viewportHeight + 'px';
+          return;
+        }
+
+        const containerWidth = record.container.clientWidth || record.container.parentElement?.clientWidth || naturalWidth;
+        const availableWidth = Math.max(1, containerWidth - 48);
+        const scale = Math.min(1, availableWidth / naturalWidth);
+        const viewportWidth = Math.max(1, Math.ceil(naturalWidth * scale));
+        const viewportHeight = Math.max(1, Math.ceil(naturalHeight * scale));
+
+        record.diagram.style.width = '100%';
+        record.diagram.style.height = '';
+        record.diagram.style.minWidth = viewportWidth + 48 + 'px';
+        record.diagram.style.minHeight = viewportHeight + 48 + 'px';
+
+        record.svg.setAttribute('width', String(viewportWidth));
+        record.svg.setAttribute('height', String(viewportHeight));
+        record.svg.style.width = viewportWidth + 'px';
+        record.svg.style.height = viewportHeight + 'px';
+      }
+
+      updateZoomIndicator(index, zoom) {
+        const record = this.instances.get(index);
+        if (!record) return;
+
+        const indicator = record.container.querySelector('.mermaid-zoom-indicator');
+        if (indicator) {
+          indicator.textContent = Math.round(zoom * 100) + '%';
+        }
+      }
+
+      fitAndCenter(index) {
+        const record = this.instances.get(index);
+        if (!record) return;
+
+        this.applyViewport(record);
+
+        requestAnimationFrame(() => {
+          try {
+            record.panZoom.resize();
+            record.panZoom.fit();
+            record.panZoom.center();
+            this.updateZoomIndicator(index, record.panZoom.getZoom());
+          } catch (error) {
+            console.error('Failed to fit Mermaid diagram:', error);
+          }
+        });
+      }
+
+      resizeAll() {
+        this.instances.forEach((_, index) => {
+          this.fitAndCenter(index);
+        });
+      }
+
+      handleFullscreenChange() {
+        this.instances.forEach((record, index) => {
+          const isFullscreen = document.fullscreenElement === record.container;
+          record.container.classList.toggle('is-fullscreen', isFullscreen);
+          record.container.classList.remove('zoomed');
+
+          // Wait until the browser applies fullscreen dimensions, then refit.
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => this.fitAndCenter(index));
+          });
+        });
+      }
+
+      initPanZoom(container, diagram, svg, index) {
+        try {
+          const existingRecord = this.instances.get(index);
+          if (existingRecord && existingRecord.panZoom && existingRecord.panZoom.destroy) {
+            try { existingRecord.panZoom.destroy(); } catch (e) {}
+          }
+
+          this.prepareSvg(svg);
+          const naturalSize = this.readSvgSize(svg);
+
+          const record = {
+            container,
+            diagram,
+            svg,
+            naturalWidth: naturalSize.width,
+            naturalHeight: naturalSize.height,
+            panZoom: null
+          };
+
+          this.applyViewport(record);
+
+          const panZoomInstance = svgPanZoom(svg, {
+            center: false,
+            controlIconsEnabled: false,
+            fit: false,
+            maxZoom: 10,
+            minZoom: 0.1,
+            panEnabled: true,
+            zoomEnabled: true,
+            dblClickZoomEnabled: true,
+            mouseWheelZoomEnabled: true,
+            preventMouseEventsDefault: false,
+            onZoom: (zoom) => {
+              this.updateZoomIndicator(index, zoom);
+              container.classList.toggle('zoomed', zoom > 1.01);
+            }
+          });
+
+          record.panZoom = panZoomInstance;
+          this.instances.set(index, record);
+
+          this.fitAndCenter(index);
+        } catch (error) {
+          console.error('Failed to initialize pan/zoom:', error);
+        }
+      }
+
+      toggleFullscreen(container) {
+        if (!container) return;
+
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          container.requestFullscreen().catch(err => {
+            console.error('Fullscreen error:', err);
+          });
+        }
+      }
+
+      // Public method to re-process diagrams (useful after dynamic content changes)
+      refresh() {
+        this.processDiagrams();
+        this.resizeAll();
+      }
+    }
+
+    // Initialize global manager
+    const mermaidPanZoom = new MermaidPanZoomManager();
+
     // Mermaid configuration for version 11.x
     mermaid.init({
       startOnLoad: false,
@@ -822,10 +1312,10 @@ function buildPage(htmlContent: string, fileName: string): string {
       },
       flowchart: {
         curve: 'basis',
-        padding: 20,
-        nodeSpacing: 50,
-        rankSpacing: 80,
-        htmlLabels: true
+        padding: 32,
+        nodeSpacing: 64,
+        rankSpacing: 90,
+        htmlLabels: false
       },
       sequence: {
         diagramMarginX: 50,
@@ -842,40 +1332,64 @@ function buildPage(htmlContent: string, fileName: string): string {
         useMaxWidth: true
       },
       state: {
-        dividerMargin: 10,
+        dividerMargin: 12,
         sizeUnit: 5,
-        padding: 8,
-        textHeight: 10,
+        padding: 14,
+        textHeight: 18,
         titleShift: -15,
-        noteMargin: 10,
+        noteMargin: 12,
         forkWidth: 14,
         forkHeight: 7,
-        miniPadding: 2,
+        miniPadding: 4,
         fontSizeFactor: 5.02,
-        fontSize: 24,
-        labelHeight: 16,
-        edgeLength: 80,
-        compositTitleSize: 35
+        fontSize: 14,
+        labelHeight: 22,
+        edgeLength: 90,
+        compositTitleSize: 18
       },
       securityLevel: 'loose'
     });
 
-    // Render all mermaid diagrams
-    document.addEventListener('DOMContentLoaded', () => {
+    // Render all mermaid diagrams after web fonts are ready.
+    // Mermaid measures labels during render; rendering before Inter is loaded can make nodes too small.
+    let mermaidRenderStarted = false;
+
+    async function renderMermaidDiagramsOnce() {
+      if (mermaidRenderStarted) return;
+
       const mermaidElements = document.querySelectorAll('.article-content .mermaid');
-      if (mermaidElements.length > 0) {
-        mermaid.run({ nodes: [...mermaidElements] });
+      if (mermaidElements.length === 0) return;
+
+      mermaidRenderStarted = true;
+
+      try {
+        if (document.fonts && document.fonts.ready) {
+          await document.fonts.ready;
+        }
+      } catch (error) {
+        // Continue even if the browser does not support document.fonts.
       }
+
+      await mermaid.run({ nodes: [...mermaidElements] });
+      setTimeout(() => mermaidPanZoom.refresh(), 300);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      renderMermaidDiagramsOnce();
     });
 
-    // Also try to render immediately in case DOM is already loaded
     window.addEventListener('load', () => {
-      const mermaidElements = document.querySelectorAll('.article-content .mermaid');
-      if (mermaidElements.length > 0 && mermaidElements[0].getAttribute('data-processed')) {
-        return;
-      }
-      mermaid.run({ nodes: [...mermaidElements] });
+      renderMermaidDiagramsOnce();
     });
+
+    // Re-render on mermaid code changes (for live updates)
+    const originalMermaidRun = mermaid.run.bind(mermaid);
+    mermaid.run = function(options) {
+      const result = originalMermaidRun(options);
+      // Refresh pan/zoom after rendering
+      setTimeout(() => mermaidPanZoom.refresh(), 300);
+      return result;
+    };
 
     // Close dropdowns when clicking outside
     document.addEventListener('click', (e) => {
@@ -909,15 +1423,18 @@ function buildPage(htmlContent: string, fileName: string): string {
     function setWidth(width, event) {
       event.stopPropagation();
       document.documentElement.style.setProperty('--content-width', width + 'px');
-      
+
       // Update active state
       document.querySelectorAll('.width-option').forEach(opt => {
         opt.classList.remove('active');
       });
       event.currentTarget.classList.add('active');
-      
+
       // Close dropdown
       document.getElementById('widthDropdown')?.classList.remove('show');
+
+      // Recalculate diagram viewport after the article width changes.
+      setTimeout(() => mermaidPanZoom.resizeAll(), 50);
     }
 
     // Set article date
@@ -937,6 +1454,52 @@ function buildPage(htmlContent: string, fileName: string): string {
       const docHeight = document.documentElement.scrollHeight - window.innerHeight;
       const progress = (scrollTop / docHeight) * 100;
       document.getElementById('progress').style.width = progress + '%';
+    });
+
+    // Keyboard shortcuts for mermaid toolbar
+    document.addEventListener('keydown', (e) => {
+      // Only handle when not typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+        return;
+      }
+
+      const activeElement = document.activeElement;
+      const isDiagramFocused = activeElement?.closest('.mermaid-container') !== null;
+
+      if (!isDiagramFocused) return;
+
+      const container = activeElement.closest('.mermaid-container');
+      const idx = parseInt(container?.dataset.index || '-1', 10);
+      const record = mermaidPanZoom?.instances?.get(idx);
+
+      if (!record) return;
+
+      switch (e.key) {
+        case '+':
+        case '=':
+          e.preventDefault();
+          record.panZoom.zoomIn();
+          break;
+        case '-':
+        case '_':
+          e.preventDefault();
+          record.panZoom.zoomOut();
+          break;
+        case 'r':
+        case 'R':
+          e.preventDefault();
+          mermaidPanZoom.fitAndCenter(idx);
+          break;
+        case 'f':
+        case 'F':
+          e.preventDefault();
+          mermaidPanZoom.toggleFullscreen(container);
+          break;
+        case '0':
+          e.preventDefault();
+          mermaidPanZoom.fitAndCenter(idx);
+          break;
+      }
     });
   </script>
 </body>
