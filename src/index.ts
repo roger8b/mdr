@@ -65,12 +65,14 @@ async function checkExistingServer(): Promise<LockData | null> {
 }
 
 async function startServerDaemon(): Promise<number> {
-  const distPath = path.join(process.cwd(), "dist", "server.js");
+  const mdrDir = path.join(os.homedir(), ".mdr");
+  const distPath = path.join(mdrDir, "dist", "server.js");
+  const nodePath = process.execPath;
 
-  const child = spawn("node", [distPath, "--daemon"], {
+  const child = spawn(nodePath, [distPath, "--daemon"], {
     detached: true,
     stdio: "ignore",
-    cwd: process.cwd(),
+    cwd: mdrDir,
   });
 
   child.unref();

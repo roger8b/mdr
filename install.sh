@@ -4,7 +4,7 @@ set -euo pipefail
 # mdr (markdown-render) installer
 # Usage: bash install.sh [--local [src]]
 
-REPO_URL="https://github.com/roger8b/markdown-render"
+REPO_URL="https://github.com/roger8b/mdr"
 INSTALL_DIR="${HOME}/.mdr"
 USE_LOCAL=false
 LOCAL_SOURCE=""
@@ -61,13 +61,17 @@ if $USE_LOCAL; then
     dim "syncing $LOCAL_SOURCE → $INSTALL_DIR …"
     mkdir -p "$INSTALL_DIR"
     if command -v rsync >/dev/null 2>&1; then
-      rsync -a --delete --exclude node_modules --exclude dist --exclude .git "$LOCAL_SOURCE/" "$INSTALL_DIR/"
+      rsync -a --delete --exclude node_modules --exclude .git "$LOCAL_SOURCE/" "$INSTALL_DIR/"
     else
-      (cd "$LOCAL_SOURCE" && tar --exclude=node_modules --exclude=dist --exclude=.git -cf - .) | (cd "$INSTALL_DIR" && tar -xf -)
+      (cd "$LOCAL_SOURCE" && tar --exclude=node_modules --exclude=.git -cf - .) | (cd "$INSTALL_DIR" && tar -xf -)
     fi
   else
-    [[ -d "$INSTALL_DIR" ]] || err "no local install at $INSTALL_DIR. Run with --local <src> first."
-    dim "using existing $INSTALL_DIR"
+    # No explicit path given — use current directory if it looks like a mdr checkout
+    if [[ -f "$PWD/package.json" ]]; then
+      LOCAL_SOURCE="$PWD"
+    else
+      err "no package.json found in $PWD. Run from a mdr checkout or specify --local <path>"
+    fi
   fi
 elif [[ -d "$INSTALL_DIR/.git" ]]; then
   warn "existing install at $INSTALL_DIR — pulling latest"
